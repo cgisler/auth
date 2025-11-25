@@ -10,6 +10,51 @@
             parent::__construct();
         }
 
+        /**
+         * Obtiene las credenciales de autenticación HTTP Basic
+         * Funciona tanto con $_SERVER['PHP_AUTH_*'] como con el header Authorization
+         */
+        private function getAuthCredentials()
+        {
+            $user = null;
+            $password = null;
+            
+            // Método 1: Variables PHP_AUTH_* (si están disponibles)
+            if (isset($_SERVER['PHP_AUTH_USER']) && isset($_SERVER['PHP_AUTH_PW'])) {
+                $user = $_SERVER['PHP_AUTH_USER'];
+                $password = $_SERVER['PHP_AUTH_PW'];
+            }
+            // Método 2: Header Authorization
+            else {
+                $auth_header = null;
+                
+                // Intentar obtener el header Authorization de diferentes maneras
+                if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+                    $auth_header = $_SERVER['HTTP_AUTHORIZATION'];
+                } elseif (isset($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+                    $auth_header = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+                } elseif (function_exists('apache_request_headers')) {
+                    $headers = apache_request_headers();
+                    if (isset($headers['Authorization'])) {
+                        $auth_header = $headers['Authorization'];
+                    } elseif (isset($headers['authorization'])) {
+                        $auth_header = $headers['authorization'];
+                    }
+                }
+                
+                // Decodificar el header Basic Auth
+                if ($auth_header && strpos($auth_header, 'Basic ') === 0) {
+                    $encoded = substr($auth_header, 6);
+                    $decoded = base64_decode($encoded);
+                    if ($decoded && strpos($decoded, ':') !== false) {
+                        list($user, $password) = explode(':', $decoded, 2);
+                    }
+                }
+            }
+            
+            return array('user' => $user, 'password' => $password);
+        }
+
         public function registrocliente(){
             try {
                 $method = $_SERVER['REQUEST_METHOD'];
@@ -142,19 +187,21 @@
                 $response = [];
                 if($method == "POST")
                 {
-                    if(empty($_SERVER['PHP_AUTH_USER']) || empty($_SERVER['PHP_AUTH_PW']) ){
+                    // Obtener credenciales usando el método robusto
+                    $auth_credentials = $this->getAuthCredentials();
+                    $client_id = $auth_credentials['user'];
+                    $key_secret = $auth_credentials['password'];
+
+                    if(empty($client_id) || empty($key_secret) ){
                         $response = array('status' => false , 'msg' => 'Autorización requerida');
-                        jsonResponse($response,200);
+                        jsonResponse($response,401);
                         die();
                     }
                     if(empty($_POST['grant_type']) || $_POST['grant_type'] != 'client_credentials'){
                         $response = array('status' => false , 'msg' => 'Error en los parámetros');
-                        jsonResponse($response,200);
+                        jsonResponse($response,400);
                         die();
                     }
-
-                    $client_id = $_SERVER['PHP_AUTH_USER'];
-                    $key_secret = $_SERVER['PHP_AUTH_PW'];
 
                     $request = $this->model->getScopeAuth($client_id,$key_secret); 
 
